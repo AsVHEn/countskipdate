@@ -21,7 +21,6 @@
 #include <gtk/gtk.h>
 
 #include "deadbeef.h"
-#include "fastftoi.h"
 
 
 #define MAX_CHANNELS 2
@@ -35,27 +34,45 @@ static const char *PLAY_COUNTER = "PLAY_COUNTER";
 static const char *FIRST_PLAYED = "FIRST_PLAYED";
 static const char *LAST_PLAYED = "LAST_PLAYED";
 
+
 static DB_misc_t plugin;
 static DB_functions_t *deadbeef    = NULL;
-static gboolean scan_start_blocked = FALSE;
-static gboolean scan_end_blocked   = FALSE;
 static intptr_t mutex              = 0;
 
-float skip_start = 0;
-float skip_finish = 0;
 int milestones[100] = {};
 int mils = 0;
 int count;
 DB_playItem_t *it;
 static DB_playItem_t *finished_song;
 
+struct skiptime{
+	float start;
+	float finish;
+};
 
+struct skiptime bounds;
 
+static const char settings_dlg[] = "property \"Skip songs with a rate less or equal as: (-1 to deactivate) \" spinbtn[-1,5,1] countskipdate.ratebound 1 \";";
 
+struct skiptime timereader(const char *skip){
+	float skip_start = 0;
+	float skip_finish = 0;
+	if (skip != NULL){
+
+		if ( skip[2] == ':' && skip[5] == ':'  && skip[8] == '-' && skip[11] == ':' && skip[14] == ':' ){
+            skip_start = (skip[0] - 48)*36000 + (skip[1] - 48)*3600 + (skip[3] - 48)*600 + (skip[4] - 48)*60 + (skip[6] - 48)*10 + (skip[7] - 48);
+            skip_finish = (skip[9] - 48)*36000 + (skip[10] - 48)*3600 + (skip[12] - 48)*600 + (skip[13] - 48)*60 + (skip[15] - 48)*10 + (skip[16] - 48);
+		}
+		else if ( skip[0] == '-' && skip[3] == ':'  && skip[6] == ':' ){
+			skip_finish = (skip[1] - 48)*36000 + (skip[2] - 48)*3600 + (skip[4] - 48)*600 + (skip[5] - 48)*60 + (skip[7] - 48)*10 + (skip[8] - 48);
+		}
+	}
+	struct skiptime parsed = {skip_start,  skip_finish};
+	return parsed;
+}
 
 static void countskipdate_wavedata_listener( void *ctx, ddb_audio_data_t *data )
 {
-
     deadbeef->mutex_lock( mutex );
     //printf( "dB: %f / start_dB: %f    middle_dB: %f     end_dB: %f \n", dB, dB_Threshold_Value_Start, dB_Threshold_Value_Middle, dB_Threshold_Value_End );
 
@@ -64,144 +81,126 @@ static void countskipdate_wavedata_listener( void *ctx, ddb_audio_data_t *data )
     //float pos         = deadbeef->streamer_get_playpos();
     //deadbeef->pl_item_unref( it );
 
-    float percent     = deadbeef->playback_get_pos();
+    //float percent     = deadbeef->playback_get_pos();
+    it = deadbeef->streamer_get_playing_track();
+	//printf("Length: %f", length);
+	//printf(" Pos: %f",pos);
+    //count             = deadbeef->pl_find_meta_int(it, PLAY_COUNTER, -1);
+	//printf(" Count: %i",count);
+    //int rate          = deadbeef->pl_find_meta_int(it, RATING, -1);
+	//printf(" Rate: %i \n",rate);
 
-    DB_playItem_t *it = deadbeef->streamer_get_playing_track();
-    float length      = deadbeef->pl_get_item_duration( it );
-    float pos         = deadbeef->streamer_get_playpos();
-    count             = deadbeef->pl_find_meta_int(it, PLAY_COUNTER, -1);
-    int rate          = deadbeef->pl_find_meta_int(it, RATING, -1);
-    const char *skip  = deadbeef->pl_find_meta (it, SKIP);
-    int per = (percent + 0.5);
-    milestones[per] = 1;
+    milestones[(int)(deadbeef->playback_get_pos() + 0.5)] = 1;
 
-    if (skip != NULL && scan_start_blocked == FALSE)
-    {
-        char kip[17]={};
-        strcpy(kip, skip);
-		if ( kip[2] == ':' && kip[5] == ':'  && kip[8] == '-' && kip[11] == ':' && kip[14] == ':' )
-        {
-            skip_start = (kip[0] - 48)*36000 + (kip[1] - 48)*3600 + (kip[3] - 48)*600 + (kip[4] - 48)*60 + (kip[6] - 48)*10 + (kip[7] - 48);
-            skip_finish = (kip[9] - 48)*36000 + (kip[10] - 48)*3600 + (kip[12] - 48)*600 + (kip[13] - 48)*60 + (kip[15] - 48)*10 + (kip[16] - 48);
-        }
-        else if ( kip[0] == '-' && kip[3] == ':'  && kip[6] == ':' )
-        {
-            skip_finish = (kip[1] - 48)*36000 + (kip[2] - 48)*3600 + (kip[4] - 48)*600 + (kip[5] - 48)*60 + (kip[7] - 48)*10 + (kip[8] - 48);
-        }
+	bounds = timereader(deadbeef->pl_find_meta (it, SKIP));
+
+
+    if ( (deadbeef->pl_find_meta_int(it, RATING, -1) != -1) && (deadbeef->pl_find_meta_int(it, RATING, -1) != 0) && (deadbeef->pl_find_meta_int(it, RATING, -1) <= deadbeef->conf_get_int("countskipdate.ratebound", -1)) ){
+		deadbeef->playback_set_pos(  99.9999999 );
     }
 
-    if ( rate == 1 )
-    {
-		deadbeef->sendmessage( DB_EV_NEXT, 0, 0, 0 );
-    }
-	else if ( skip_start < pos && skip_finish > pos )
-    {
-        deadbeef->playback_set_pos( ( skip_finish/length*100 ) );
+	else if ( bounds.start < deadbeef->streamer_get_playpos() && bounds.finish > deadbeef->streamer_get_playpos() ){
+        deadbeef->playback_set_pos( ( bounds.finish/deadbeef->pl_get_item_duration( it )*100 ) );
     }
 
     deadbeef->pl_item_unref( it );
-
     deadbeef->mutex_unlock( mutex );
 }
 
 
-static int countskipdate_connect( void )
-{
+static int countskipdate_connect( void ){
     if (mutex == 0) mutex = deadbeef->mutex_create();
     deadbeef->vis_waveform_listen( NULL, countskipdate_wavedata_listener );
-
+	printf("Mutex \n");
     return 0;
 }
 
-static int handle_event( uint32_t current_event, uintptr_t ctx, uint32_t p1, uint32_t p2 )
-{
+static int handle_event( uint32_t current_event, uintptr_t ctx, uint32_t p1, uint32_t p2 ){
 
-    if ( current_event == DB_EV_SONGFINISHED)
-    {
-		skip_start = 0;
-		skip_finish = 0;
+    // Reset variables at the end of the song
+    if ( current_event == DB_EV_SONGFINISHED){
+		printf("Main \n");
 		mils = 0;
         finished_song = ((ddb_event_track_t *) ctx)->track;
         count  = deadbeef->pl_find_meta_int (finished_song, PLAY_COUNTER,0);
-        for (int i = 0; i < 100; i = i + 1)
-        {
+        for (int i = 0; i < 100; i = i + 1){
             mils += milestones[i];
             milestones[i] = 0;
-
-
         }
 
-        // if song have been played more than 50%, PLAY_COUNTER is updated and played times.
-        if (mils > 50)
-        {
-            deadbeef->pl_lock();
+        // if the song have been played more than plugin.configdialog = 50%, PLAY_COUNTER is updated and played times.
+        if (mils > 50){
             long lclock;
             struct tm *ltime;
             char new_last[50];
 
+
             time(&lclock);
             ltime = localtime(&lclock);
             sprintf(new_last, "%d-%02d-%02d %02d:%02d:%02d",ltime->tm_year + 1900, ltime->tm_mon + 1, ltime->tm_mday, ltime->tm_hour, ltime->tm_min, ltime->tm_sec );
-
+			deadbeef->pl_lock(); 
             deadbeef->pl_set_meta_int(finished_song, PLAY_COUNTER, count + 1);
             const char *last  = deadbeef->pl_find_meta (finished_song, LAST_PLAYED);
             const char *first  = deadbeef->pl_find_meta (finished_song, FIRST_PLAYED);
             const char *track_location = deadbeef->pl_find_meta(finished_song, ":URI");
+			deadbeef->pl_unlock(); 
             printf("%s \n", track_location);
-            if (last)
-            {
+
+            if (last){
+				deadbeef->pl_lock(); 
                 deadbeef->pl_delete_meta(finished_song, LAST_PLAYED);
+				deadbeef->pl_unlock(); 
 				printf(" Deleted last: %s \n", LAST_PLAYED);
             }
             deadbeef->pl_add_meta(finished_song, LAST_PLAYED, new_last);
 			printf("Added last: %s \n", new_last);
 
-            if (!first)
-            {
+            if (!first){
+				deadbeef->pl_lock(); 
                 deadbeef->pl_add_meta(finished_song, FIRST_PLAYED, new_last);
+				deadbeef->pl_unlock();
 				printf("Added first: %s \n", FIRST_PLAYED);
             }
             //Rutine to save metadata.
+			deadbeef->pl_lock(); 
             const char *dec = deadbeef->pl_find_meta_raw(finished_song, ":DECODER");
+			deadbeef->pl_unlock(); 
             char decoder_id[100];
 
-            if (dec)
-            {
+            if (dec){
                 strncpy(decoder_id, dec, sizeof(decoder_id));
             }
             int match = finished_song && dec;
-            if (match)
-            {
+
+            if (match){
                 DB_decoder_t *dec = NULL;
                 DB_decoder_t **decoders = deadbeef->plug_get_decoder_list();
-                for (int i = 0; decoders[i]; i++)
-                {
-                    if (!strcmp(decoders[i]->plugin.id, decoder_id))
-                    {
+
+                for (int i = 0; decoders[i]; i++){
+
+                    if (!strcmp(decoders[i]->plugin.id, decoder_id)){
                         dec = decoders[i];
-                        if (dec->write_metadata)
-                        {
+
+                        if (dec->write_metadata){
+							//deadbeef->pl_lock();
                             dec->write_metadata(finished_song);
+							//deadbeef->pl_unlock(); 
 							printf("Saved metadata: %i \n", i);
                         }
                             break;
                     }
                 }
             }
-            deadbeef->pl_unlock();
         }
     }
 
-    // Reset variables at the start of the (next) song
     if ( current_event == DB_EV_SONGSTARTED )
     {
-        scan_start_blocked = FALSE;
-        scan_end_blocked   = FALSE;
         countskipdate_connect();
+		printf("Reconnecting \n");
     return 0;
 
     }
-
 
     return 0;
 }
@@ -220,7 +219,7 @@ static DB_misc_t plugin = {
     .plugin.copyright     = "Copyright (C) 2021 AsVHEn\n"
                         "\n"
                         "This program is free software; you can redistribute it and/or\n"
-                        "modify it under the terms of the GNU General Public License\n"
+                        "modify it undlear cacheer the terms of the GNU General Public License\n"
                         "as published by the Free Software Foundation; either version 3\n"
                         "of the License, or (at your option) any later version.\n"
                         "\n"
@@ -235,11 +234,12 @@ static DB_misc_t plugin = {
     .plugin.website      = "https://github.com/AsVHEn/countskipdate",
     .plugin.disconnect   = NULL,
     .plugin.message      = handle_event,
+    .plugin.configdialog = settings_dlg,
 };
 
-
-DB_plugin_t *countskipdate_load( DB_functions_t *ddb )
-{
+DB_plugin_t *countskipdate_load( DB_functions_t *ddb ){
     deadbeef = ddb;
-    return &plugin.plugin;
+	bindtextdomain("deadbeef-countskipdate", "/usr/share/locale");
+	textdomain("deadbeef-countskipdate");
+	return DB_PLUGIN(&plugin);
 }
