@@ -57,10 +57,10 @@ struct skiptime bounds;
 
 static const char settings_dlg[] = "property \"Skip songs with a rate less or equal as: (-1 to deactivate) \" spinbtn[-1,5,1] countskipdate.ratebound 1 \";";
 
-struct skiptime timereader(const char *skip){
+struct skiptime timereader(const char *skip) {
 	float skip_start = 1;
 	float skip_finish = 0;
-	if (skip != NULL){
+	if (skip != NULL) {
 
 		if ( skip[2] == ':' && skip[5] == ':'  && skip[8] == '-' && skip[11] == ':' && skip[14] == ':' ){
             skip_start = (skip[0] - 48)*36000 + (skip[1] - 48)*3600 + (skip[3] - 48)*600 + (skip[4] - 48)*60 + (skip[6] - 48)*10 + (skip[7] - 48);
