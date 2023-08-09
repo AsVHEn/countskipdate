@@ -1,62 +1,84 @@
-CFLAGS+=-std=c99 -Wall -O2 -D_GNU_SOURCE -fPIC -fvisibility=hidden -flto=auto
-CXXFLAGS+=-std=c++14 -Wall -O2 -fPIC -fvisibility=hidden -flto=auto
-LIBFLAGS=`pkg-config --cflags $(GTKMM) $(GTK)`
-LIBS=`pkg-config --libs $(GTKMM) $(GTK)`
-LCURL=-lcurl
-LDFLAGS+=-flto=auto
-GLIBC=glib-compile-resources
+#    Silence Removal Plugin for the DeaDBeeF audio player
+#
+#    Based on Volume Meter plugin from Christian Boxdörfer <christian.boxdoerfer@posteo.de>
+#
+#    This program is free software; you can redistribute it and/or
+#    modify it under the terms of the GNU General Public License
+#    as published by the Free Software Foundation; either version 2
+#    of the License, or (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-prefix ?= $(out)
-prefix ?= /usr
+OUT_GTK2?=countskipdate.so
+OUT_GTK3?=countskipdate.so
 
-gtk3: GTKMM=gtkmm-3.0  taglib
-gtk3: GTK=gtk+-3.0
-gtk3: LYRICBAR=ddb_lyricbar_gtk3.so
-gtk3: lyricbar
+GTK2_CFLAGS?=`pkg-config --cflags gtk+-2.0`
+GTK3_CFLAGS?=`pkg-config --cflags gtk+-3.0`
 
-gtk2: GTKMM=gtkmm-2.4
-gtk2: GTK=gtk+-2.0
-gtk2: LYRICBAR=ddb_lyricbar_gtk2.so
-gtk2: lyricbar
+GTK2_LIBS?=`pkg-config --libs gtk+-2.0`
+GTK3_LIBS?=`pkg-config --libs gtk+-3.0`
 
-lyricbar: resource.h config_dialog.o lrcspotify.o megalobiz.o azlyrics.o ui.o utils.o resources.o main.o
-	$(if $(LYRICBAR),, $(error You should only access this target via "gtk3" or "gtk2"))
-	$(CXX) -rdynamic -shared $(LDFLAGS) main.o resources.o config_dialog.o lrcspotify.o megalobiz.o azlyrics.o ui.o utils.o $(LCURL) -o $(LYRICBAR) $(LIBS)
+CC?=gcc
+CFLAGS+=-Wall -g -fPIC -std=c99 -D_GNU_SOURCE
+LDFLAGS+=-shared
 
-lrcspotify.o: src/lrcspotify.cpp
-	$(CXX) src/lrcspotify.cpp -c $(LIBFLAGS) $(CXXFLAGS) -lcurl
+GTK2_DIR?=gtk2
+GTK3_DIR?=gtk3
 
-megalobiz.o: src/megalobiz.cpp
-	$(CXX) src/megalobiz.cpp -c $(LIBFLAGS) $(CXXFLAGS) -lcurl
+SOURCES?=$(wildcard *.c)
+OBJ_GTK2?=$(patsubst %.c, $(GTK2_DIR)/%.o, $(SOURCES))
+OBJ_GTK3?=$(patsubst %.c, $(GTK3_DIR)/%.o, $(SOURCES))
 
-azlyrics.o: src/azlyrics.cpp
-	$(CXX) src/azlyrics.cpp -c $(LIBFLAGS) $(CXXFLAGS) -lcurl
+define compile
+	$(CC) $(CFLAGS) $1 $2 $< -c -o $@
+endef
 
-ui.o: src/ui.cpp
-	$(CXX) src/ui.cpp -c $(LIBFLAGS) $(CXXFLAGS)
+define link
+	$(CC) $(LDFLAGS) $1 $2 $3 -o $@
+endef
 
-utils.o: src/utils.cpp
-	$(CXX) src/utils.cpp -c $(LIBFLAGS) $(CXXFLAGS)
+# Builds both GTK+2 and GTK+3 versions of the plugin.
+all: gtk2 gtk3
 
-config_dialog.o: src/config_dialog.cpp src/resources.h
-	$(CXX) src/config_dialog.cpp  -c $(LIBFLAGS) $(CXXFLAGS)
+# Builds GTK+2 version of the plugin.
+gtk2: mkdir_gtk2 $(SOURCES) $(GTK2_DIR)/$(OUT_GTK2)
 
-resources.o: src/resources.c
-	$(CC) $(CFLAGS) src/resources.c -c `pkg-config --cflags $(GTK)`
+# Builds GTK+3 version of the plugin.
+gtk3: mkdir_gtk3 $(SOURCES) $(GTK3_DIR)/$(OUT_GTK3)
 
-main.o: src/main.c
-	$(CC) $(CFLAGS) src/main.c -c `pkg-config --cflags $(GTK)`
+mkdir_gtk2:
+	@echo "Creating build directory for GTK+2 version"
+	@mkdir -p $(GTK2_DIR)
 
-resource.h:
-	$(GLIBC) --generate-source src/resources.xml
-	$(GLIBC) --generate-header src/resources.xml
+mkdir_gtk3:
+	@echo "Creating build directory for GTK+3 version"
+	@mkdir -p $(GTK3_DIR)
 
-install:
-	install -d $(prefix)/lib/deadbeef
-	install -d $(prefix)/share/locale/ru/LC_MESSAGES
-	install -m 666 -D *.so $(prefix)/lib/deadbeef
-	msgfmt gettext/ru/deadbeef-lyricbar.po -o $(prefix)/share/locale/ru/LC_MESSAGES/deadbeef-lyricbar.mo
+$(GTK2_DIR)/$(OUT_GTK2): $(OBJ_GTK2)
+	@echo "Linking GTK+2 version"
+	@$(call link, $(OBJ_GTK2), $(GTK2_LIBS))
+	@echo "Done!"
+
+$(GTK3_DIR)/$(OUT_GTK3): $(OBJ_GTK3)
+	@echo "Linking GTK+3 version"
+	@$(call link, $(OBJ_GTK3), $(GTK3_LIBS))
+	@echo "Done!"
+
+$(GTK2_DIR)/%.o: %.c
+	@echo "Compiling $(subst $(GTK2_DIR)/,,$@)"
+	@$(call compile, $(GTK2_CFLAGS))
+
+$(GTK3_DIR)/%.o: %.c
+	@echo "Compiling $(subst $(GTK3_DIR)/,,$@)"
+	@$(call compile, $(GTK3_CFLAGS))
 
 clean:
-	rm -f *.o *.so
-
+	@echo "Cleaning files from previous build..."
+	@rm -r -f $(GTK2_DIR) $(GTK3_DIR)

@@ -5,9 +5,7 @@
 #include "megalobiz.h"
 #include "azlyrics.h"
 #include <deadbeef/deadbeef.h>
-#include "resources.h"
-#include <gtkmm.h>
-
+		
 #include <filesystem>
 #include <vector>
 #include <thread>
@@ -17,7 +15,10 @@
 
 // - Global
 
+char *home_cache = getenv("HOME");
 char *locale_lang = setlocale(LC_CTYPE, NULL);
+string local = "/.local/lib/deadbeef/panels.glade";
+string Glade_file_path = home_cache + local;
 
 
 // - Config widgets
@@ -208,7 +209,7 @@ int on_button_config (GtkMenuItem *menuitem, gpointer user_data) {
 // establish contact with xml code used to adjust widget settings
 //---------------------------------------------------------------------
 
-	builder = gtk_builder_new_from_resource ("/unique/prefix/panels.glade");
+	builder = gtk_builder_new_from_file (Glade_file_path.c_str());
  
 	ConfigWindow = GTK_WINDOW(gtk_builder_get_object(builder, "ConfigWindow"));
 
@@ -432,7 +433,7 @@ void	on_Exit_clicked (GtkButton *b, gpointer user_data) {
 extern "C"
 int on_button_search (GtkMenuItem *menuitem, gpointer user_data) {
 
-	builder = gtk_builder_new_from_resource ("/unique/prefix/panels.glade");
+	builder = gtk_builder_new_from_file (Glade_file_path.c_str());
 
 	SearchWindow = GTK_WINDOW(gtk_builder_get_object(builder, "SearchWindow"));
 
@@ -732,7 +733,7 @@ void	on_Edit_OK_clicked (GtkButton *b, gpointer user_data) {
 extern "C"
 int on_button_edit (GtkMenuItem *menuitem, gpointer user_data) {
 
-	builder = gtk_builder_new_from_resource ("/unique/prefix/panels.glade");
+	builder = gtk_builder_new_from_file (Glade_file_path.c_str());
 
 	EditWindow = GTK_WINDOW(gtk_builder_get_object(builder, "EditWindow"));
 
